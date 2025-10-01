@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ゴールドバッハ予想検証ツール Ver. 1.0.0</title>
+  <style>
+    #output {
+      white-space: pre-wrap;
+      font-family: monospace;
+      background: #f8f8f8;
+      padding: 1em;
+      border: 1px solid #ddd;
+      max-height: 60vh;
+      overflow: auto;
+    }
+    .row { margin: 0.25em 0; }
+    .error { color: red; }
+    .progress { color: blue; }
+  </style>
+</head>
+<body>
+  <h1>ゴールドバッハ予想検証ツール Ver.1.0.0</h1>
+  <h3>このツールの使い方などは、<a href="https://github.com/cod-git12/open-question.val-tool.math.goldbach">https://github.com/cod-git12/open-question.val-tool.math.goldbach</a> を見てください。</h3>
+  <h4>このツールは、MIT Licenseで保護されています。　<a href="https://github.com/cod-git12/open-question.val-tool.math.goldbach/blob/main/LICENSE">https://github.com/cod-git12/open-question.val-tool.math.goldbach/blob/main/LICENSE</a></h4>
+  <label>
+    開始偶数:
+    <input id="startN" type="number" value="4" min="4" step="2" />
+  </label>
+  <br/>
+  <label>
+    終了偶数:
+    <input id="endN" type="number" value="1000" min="4" step="2" />
+  </label>
+  <br/>
+  <label>
+    素数の探索上限:
+    <input id="maxPrime" type="number" value="10000" min="2" />
+  </label>
+  <br/>
+  <label>
+    <input id="showOnlyNotFound" type="checkbox" />
+    素数のペアが見つからなかったもののみ表示
+  </label>
+  <br/>
+  <button id="runBtn">検証を実行</button>
+
+  <h2>結果</h2>
+  <div id="progress" class="progress"></div>
+  <div id="output"></div>
+
+  <script>
+    // 素数判定（エラトステネスの篩の簡略版）
+    function generatePrimes(limit) {
+      const sieve = new Array(limit + 1).fill(true);
+      sieve[0] = sieve[1] = false;
+      for (let i = 2; i <= Math.sqrt(limit); i++) {
+        if (sieve[i]) {
+          for (let j = i * i; j <= limit; j += i) {
+            sieve[j] = false;
+          }
+        }
+      }
+      const primes = [];
+      for (let i = 2; i <= limit; i++) {
+        if (sieve[i]) primes.push(i);
+      }
+      return primes;
+    }
+
+    // ゴールドバッハ予想の検証（nが2つの素数の和で表せるか）
+    function checkGoldbach(n, primes) {
+      if (n % 2 !== 0 || n < 4) throw new Error("n must be an even integer >= 4");
+      for (let i = 0; i < primes.length && primes[i] <= n / 2; i++) {
+        const p1 = primes[i];
+        const p2 = n - p1;
+        if (primes.includes(p2)) {
+          return { found: true, pair: [p1, p2] };
+        }
+      }
+      return { found: false, pair: null };
+    }
+
+    // 範囲内の偶数をテスト（チャンク処理）
+    function testRange(start, end, maxPrime, onProgress) {
+      const results = [];
+      const chunkSize = 100; // 1回に処理する偶数の数
+      const primes = generatePrimes(maxPrime);
+      let current = start;
+
+      function processChunk() {
+        const chunkEnd = Math.min(current + chunkSize - 2, end);
+        for (let n = current; n <= chunkEnd; n += 2) {
+          const result = checkGoldbach(n, primes);
+          results.push({ n, ...result });
+        }
+        current = chunkEnd + 2;
+
+        // 進捗更新
+        const progress = Math.round(((current - start) / (end - start + 1)) * 100);
+        onProgress(progress, results);
+
+        if (current <= end) {
+          setTimeout(processChunk, 0); // 次のチャンクを非同期で処理
+        }
+      }
+
+      processChunk();
+      return results;
+    }
+
+    // 結果を表示（フィルタリング付き）
+    function displayResults(results, showOnlyNotFound) {
+      const outputDiv = document.getElementById("output");
+      const filteredResults = showOnlyNotFound
+        ? results.filter(result => !result.found)
+        : results;
+
+      if (filteredResults.length === 0) {
+        outputDiv.textContent = "結果がありません。";
+        return;
+      }
+
+      let output = "";
+      filteredResults.forEach(({ n, found, pair }) => {
+        output += `計測数値: ${n}  素数のペア${found ? `が見つかった: [${pair[0]}, ${pair[1]}]` : "が見つからなかった"}\n`;
+      });
+      outputDiv.textContent = output;
+    }
+
+    // ボタンクリック時の処理
+    document.getElementById("runBtn").addEventListener("click", () => {
+      const startN = parseInt(document.getElementById("startN").value);
+      const endN = parseInt(document.getElementById("endN").value);
+      const maxPrime = parseInt(document.getElementById("maxPrime").value);
+      const showOnlyNotFound = document.getElementById("showOnlyNotFound").checked;
+      const outputDiv = document.getElementById("output");
+      const progressDiv = document.getElementById("progress");
+
+      // 入力バリデーション
+      if (!Number.isInteger(startN) || startN < 4 || startN % 2 !== 0) {
+        outputDiv.innerHTML = '<span class="error">開始偶数は4以上の偶数で入力してください。</span>';
+        return;
+      }
+      if (!Number.isInteger(endN) || endN < startN || endN % 2 !== 0) {
+        outputDiv.innerHTML = '<span class="error">終了偶数は開始偶数以上の偶数で入力してください。</span>';
+        return;
+      }
+      if (!Number.isInteger(maxPrime) || maxPrime < 2) {
+        outputDiv.innerHTML = '<span class="error">素数の探索上限は2以上の自然数で入力してください。</span>';
+        return;
+      }
+
+      // 初期化
+      outputDiv.textContent = "";
+      progressDiv.textContent = "計算中: 0%";
+      document.getElementById("runBtn").disabled = true;
+
+      // 計算と進捗表示
+      const results = [];
+      testRange(startN, endN, maxPrime, (progress, partialResults) => {
+        progressDiv.textContent = `計算中: ${progress}%`;
+        if (progress === 100) {
+          progressDiv.textContent = "計算完了";
+          document.getElementById("runBtn").disabled = false;
+          displayResults(partialResults, showOnlyNotFound);
+        }
+      });
+    });
+  </script>
+</body>
+</html>
